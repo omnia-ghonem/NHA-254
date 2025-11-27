@@ -1,0 +1,56 @@
+---
+
+- name: Deploy kube-state-metrics
+  hosts: masters
+  become: yes
+
+  vars:
+
+    kubeconfig_path: /home/ec2-user/.kube/config
+    kube_state_metrics_download: /opt/kubernetes-kube-state-metrics
+    kube_state_metrics_namespace: "kube-system"
+
+  tasks:
+
+
+    - name: Download kube state metrics Manifest Files From Github
+      ansible.builtin.git:
+        repo: "https://github.com/devopscube/kube-state-metrics-configs.git"
+        dest: "{{ kube_state_metrics_download }}"
+
+
+    - name: Apply Cluster Role manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ kube_state_metrics_download }}/cluster-role.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+    - name: Apply service account manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ kube_state_metrics_download }}/service-account.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+    - name: Apply cluster role binding manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ kube_state_metrics_download }}/cluster-role-binding.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+    - name: Apply Deployment manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ kube_state_metrics_download }}/deployment.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+    - name: Apply Service manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ kube_state_metrics_download }}/service.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes

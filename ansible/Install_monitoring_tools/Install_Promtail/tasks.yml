@@ -1,0 +1,77 @@
+- name: Install Alertmanager
+  hosts: masters
+  become: yes
+  vars:
+    kubeconfig_path: /home/ec2-user/.kube/config
+    promtail_namespace: "monitoring"
+    promtail_download: "/opt/kubernetes-promtail/"
+
+
+  tasks:
+    - name: Ensure the promtail directory exists
+      ansible.builtin.file:
+        path: "{{ promtail_download }}" # Specify the absolute path to the directory
+        state: directory
+        owner: ec2-user # Optional: Set the owner of the directory
+        group: ec2-user # Set the group of the directory
+        mode: '0755' # Set the permissions for the directory
+
+    - name: Copy full app folder to remote host
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ promtail_download }}/{{ item | basename }}"
+        mode: "0755"
+      loop:
+        - ./promtail/clusterrole.yaml
+        - ./promtail/cluster_role_binding.yaml
+        - ./promtail/service_account.yaml
+        - ./promtail/configmap.yaml
+        - ./promtail/daemonset.yaml
+
+        
+    - name: Apply Promtail cluster role manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ promtail_download }}/clusterrole.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+    - name: Apply Promtail cluster role binding manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ promtail_download }}/cluster_role_binding.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+    - name: Apply Promtail ser manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ promtail_download }}/service_account.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+    - name: Apply Promtail Service manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ promtail_download }}/configmap.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+    - name: Apply Promtail pod manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ promtail_download }}/daemonset.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+# For first time login use below credentials
+# user: admin
+# password: admin
+
+# edited 
+# user: admin
+# password: grafana

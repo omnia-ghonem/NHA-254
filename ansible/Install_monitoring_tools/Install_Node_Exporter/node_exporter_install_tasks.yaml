@@ -1,0 +1,32 @@
+- name: Install Alertmanager
+  hosts: masters
+  become: yes
+  vars:
+    kubeconfig_path: /home/ec2-user/.kube/config
+    node_exporter_namespace: "monitoring"
+    node_exporter_download: "/opt/kubernetes-node-exporter/"
+
+
+  tasks:
+
+    - name: Download prometheus Manifest Files From Github
+      ansible.builtin.git:
+          repo: "https://github.com/bibinwilson/kubernetes-node-exporter"
+          dest: "{{ node_exporter_download }}"
+
+
+    - name: Apply Node Exporter Daemonset
+      ansible.builtin.command: >
+        kubectl apply -f {{ node_exporter_download }}/daemonset.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+    - name: Apply Node Exporter Service
+      ansible.builtin.command: >
+        kubectl apply -f {{ node_exporter_download }}/service.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+      

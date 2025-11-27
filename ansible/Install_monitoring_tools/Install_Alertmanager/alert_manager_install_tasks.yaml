@@ -1,0 +1,55 @@
+- name: Install Alertmanager
+  hosts: masters
+  become: yes
+  vars:
+    kubeconfig_path: /home/ec2-user/.kube/config
+    alertmanager_namespace: "monitoring"
+    alertmanager_download: "/opt/kubernetes-alertmanager/"
+
+
+  tasks:
+
+
+    - name: Download Jenkins Kubernetes Manifest Files From Github
+      ansible.builtin.git:
+        repo: "https://github.com/bibinwilson/kubernetes-alert-manager.git"
+        dest: "{{ alertmanager_download }}"
+
+
+    - name: Copy full app folder to remote host
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ alertmanager_download }}/{{ item | basename }}"
+        mode: "0755"
+      loop:
+        - ./AlertManagerConfigmap.yaml
+
+
+    - name: Apply Alertmanager AlertTemplateConfigMap manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ alertmanager_download }}/AlertTemplateConfigMap.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+        
+    - name: Apply AlertManagerConfigmap manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ alertmanager_download }}/AlertManagerConfigmap.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+    - name: Apply Alertmanager Deployment manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ alertmanager_download }}/Deployment.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+    - name: Apply Alertmanager Service manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ alertmanager_download }}/Service.yaml -n {{ alertmanager_namespace }}
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes

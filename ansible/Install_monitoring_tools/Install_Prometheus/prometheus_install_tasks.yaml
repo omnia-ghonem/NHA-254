@@ -1,0 +1,71 @@
+---
+- name: Install Prometheus
+  hosts: masters
+  become: yes
+  vars:
+    kubeconfig_path: /home/ec2-user/.kube/config
+    prometheus_namespace: "monitoring"
+    prometheus_download: /opt/kubernetes-prometheus/
+
+  tasks:
+
+    - name: Install git
+      ansible.builtin.yum:
+        name: git
+        state: present
+
+
+    - name: Download prometheus Manifest Files From Github
+      ansible.builtin.git:
+        repo: "https://github.com/techiescamp/kubernetes-prometheus"
+        dest: "{{ kubernetes-prometheus }}"
+
+
+    - name: Create Prometheus namespace
+      ansible.builtin.command: >
+        kubectl create namespace {{ prometheus_namespace }}
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+    - name: Apply Cluster Role manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ prometheus_download }}/clusterRole.yaml
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+    - name: Apply ConfigMap for Prometheus Config
+      ansible.builtin.command: >
+        kubectl create -f https://raw.githubusercontent.com/bibinwilson/kubernetes-prometheus/master/config-map.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+    - name: Apply Prometheus Deployment manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ prometheus_download }}/prometheus-deployment.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+    - name: Apply Prometheus Service manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ prometheus_download }}/prometheus-service.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+
+# add this job to scrape metrics from todo-app
+# kubectl edit configmap prometheus-server-conf -n monitoring
+#scrape_configs:
+#      - job_name: "todo-app"
+#        metrics_path: "/metrics"
+#        static_configs:
+#          - targets: ['todo-app-service.to-do-namespace.svc.cluster.local:80']
+# Restart Prometheus to apply changes
+# kubectl rollout restart deployment prometheus-deployment -n monitoring

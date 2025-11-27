@@ -1,0 +1,72 @@
+- name: Install Alertmanager
+  hosts: masters
+  become: yes
+  vars:
+    kubeconfig_path: /home/ec2-user/.kube/config
+    loki_namespace: "monitoring"
+    loki_download: "/opt/kubernetes-loki/"
+
+
+  tasks:
+
+    - name: Ensure the loki directory exists
+      ansible.builtin.file:
+        path: "{{ loki_download }}" # Specify the absolute path to the directory
+        state: directory
+        owner: ec2-user # Optional: Set the owner of the directory
+        group: ec2-user # Set the group of the directory
+        mode: '0755' # Set the permissions for the directory
+
+    - name: Copy full app folder to remote host
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ loki_download }}/{{ item | basename }}"
+        mode: "0755"
+      loop:
+        - ./loki/secret.yaml
+        - ./loki/service_headless.yaml
+        - ./loki/statefulset.yaml
+        - ./loki/service.yaml
+        - ./loki/pod.yaml
+
+        
+    - name: Apply Loki Secret manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ loki_download }}/secret.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+    - name: Apply Loki Service-Headless manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ loki_download }}/service_headless.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+    - name: Apply Loki StateFulSet manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ loki_download }}/statefulset.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+    - name: Apply Loki Service manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ loki_download }}/service.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+
+    - name: Apply Loki pod manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ loki_download }}/pod.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+

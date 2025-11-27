@@ -1,0 +1,314 @@
+  # tasks file for kubernetes_master (CentOS 10)
+- name: Install Kubernetes Master Node
+  hosts: masters
+  become: true
+  vars:
+    ansible_user: ec2-user
+    kube_user_home: /home/ec2-user
+    kubeconfig_path: /home/ec2-user/.kube/config
+    pod_network_cidr: "10.244.0.0/16"
+    calico_manifest: "https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/calico.yaml"
+    
+  tasks:
+
+    - name: Remove old Docker and Kubernetes packages
+      command: yum remove -y docker docker-client docker-client-latest docker-common docker-latest docker-latest-logrotate docker-logrotate docker-engine podman runc kube*
+
+    - name: Set SELinux to permissive (runtime)
+      command: setenforce 0
+      ignore_errors: yes
+
+    - name: Check SELinux status
+      command: getenforce
+      register: selinux_status
+
+    - name: Print SELinux status
+      debug:
+        var: selinux_status.stdout
+
+    - name: Disable SELinux permanently
+      command: sed -i --follow-symlinks 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
+
+    - name: Load br_netfilter kernel module
+      command: modprobe br_netfilter
+
+
+    - name: Configure sysctl for Kubernetes networking
+      copy:
+        dest: /etc/sysctl.d/k8s.conf
+        content: |
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.bridge.bridge-nf-call-iptables = 1
+
+    - name: Enable IP forwarding
+      shell: echo 1 | tee /proc/sys/net/ipv4/ip_forward
+
+    - name: Apply sysctl parameters
+      command: sysctl --system
+
+    - name: Disable swap
+      command: swapoff -a
+
+    - name: Comment swap entries in /etc/fstab
+      command: sed -i '/\sswap\s/s/^/#/' /etc/fstab
+
+
+    - name: Install required base packages
+      command: yum install -y yum-utils dnf iproute-tc
+
+    - name: Install dnf plugins
+      command: dnf -y install dnf-plugins-core
+
+    - name: Add Docker CE repository
+      command: dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+
+    - name: Install Docker
+      command: dnf install -y docker
+
+    - name: Enable and start Docker service
+      command: systemctl enable --now docker
+
+    - name: Configure Docker daemon
+      copy:
+        dest: /etc/docker/daemon.json
+        content: |
+          {
+            "exec-opts": ["native.cgroupdriver=systemd"],
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "100m"
+            }
+          }
+
+    - name: Restart Docker service
+      command: systemctl restart docker
+
+    - name: Set SELinux permissive again
+      command: setenforce 0
+      ignore_errors: yes
+
+    - name: Add Kubernetes repository
+      copy:
+        dest: /etc/yum.repos.d/kubernetes.repo
+        content: |
+          [kubernetes]
+          name=Kubernetes
+          baseurl=https://pkgs.k8s.io/core:/stable:/v1.34/rpm/
+          enabled=1
+          gpgcheck=1
+          gpgkey=https://pkgs.k8s.io/core:/stable:/v1.34/rpm/repodata/repomd.xml.key
+          exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
+
+    - name: Install kubelet, kubeadm, kubectl
+      command: yum install -y kubelet kubeadm kubectl --disableexcludes=kubernetes
+
+    - name: Enable and start kubelet service
+      command: systemctl enable --now kubelet
+
+    - name: Generate containerd default configuration
+      shell: containerd config default | tee /etc/containerd/config.toml
+
+    - name: Restart containerd
+      command: systemctl restart containerd
+
+    - name: Initialize Kubernetes control plane (Flannel CIDR)
+      command: kubeadm init --pod-network-cidr=10.244.0.0/16
+      register: kubeadm_init
+
+    - name: Restart containerd again
+      command: systemctl restart containerd
+
+    - name: Disable swap again for safety
+      command: swapoff -a
+
+  #  - name: Configure kubectl for current user
+  #    shell: |
+  #      mkdir -p $HOME/.kube
+  #      sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+  #      sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+
+    - name: Configure kubectl for ec2-user
+      become: yes
+      shell: |
+        mkdir -p /home/ec2-user/.kube
+        cp -i /etc/kubernetes/admin.conf /home/ec2-user/.kube/config
+        chown ec2-user:ec2-user /home/ec2-user/.kube/config
+      args:
+        executable: /bin/bash
+
+
+    - name: Verify cluster info
+      command: kubectl cluster-info
+      register: cluster_info
+
+    - name: Print cluster info
+      debug:
+        var: cluster_info.stdout
+
+    - name: Install Calico CNI network
+      command: kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/calico.yaml
+
+    - name: Generate join command for worker nodes
+      command: kubeadm token create --ttl 0 --print-join-command
+      register: join_command
+
+    - name: Show join command
+      debug:
+        var: join_command.stdout
+
+    - name: Save join command
+      copy:
+        dest: /tmp/kubeadm_join_token.sh
+        content: |
+          #!/bin/bash
+          {{ join_command.stdout }}
+        mode: '0755'
+
+    - name: Fetch join command to control node
+      fetch:
+        src: /tmp/kubeadm_join_token.sh
+        dest: ./kubeadm_join_token.sh
+        flat: yes
+
+
+# tasks file for kubernetes_worker (CentOS 10)
+- name: Install Kubernetes Worker Node
+  hosts: workers
+  become: true
+
+  tasks:
+
+    - name: Remove old Docker and Kubernetes packages
+      command: yum remove -y docker docker-client docker-client-latest docker-common docker-latest docker-latest-logrotate docker-logrotate docker-engine podman runc kube*
+
+    - name: Set SELinux to permissive (runtime)
+      command: setenforce 0
+      ignore_errors: yes
+
+    - name: Check SELinux status
+      command: getenforce
+      register: selinux_status
+
+    - name: Print SELinux status
+      debug:
+        var: selinux_status.stdout
+
+    - name: Disable SELinux permanently
+      command: sed -i --follow-symlinks 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
+
+    - name: Load br_netfilter kernel module
+      command: modprobe br_netfilter
+
+
+    - name: Configure sysctl for Kubernetes networking
+      copy:
+        dest: /etc/sysctl.d/k8s.conf
+        content: |
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.bridge.bridge-nf-call-iptables = 1
+
+    - name: Enable IP forwarding
+      shell: echo 1 | tee /proc/sys/net/ipv4/ip_forward
+
+    - name: Apply sysctl parameters
+      command: sysctl --system
+
+    - name: Disable swap
+      command: swapoff -a
+
+    - name: Comment swap entries in /etc/fstab
+      command: sed -i '/\sswap\s/s/^/#/' /etc/fstab
+
+
+    - name: Install required base packages
+      command: yum install -y yum-utils dnf iproute-tc
+
+    - name: Install dnf plugins
+      command: dnf -y install dnf-plugins-core
+
+    - name: Add Docker CE repository
+      command: dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+
+    - name: Install Docker
+      command: dnf install -y docker
+
+    - name: Enable and start Docker service
+      command: systemctl enable --now docker
+
+    - name: Configure Docker daemon
+      copy:
+        dest: /etc/docker/daemon.json
+        content: |
+          {
+            "exec-opts": ["native.cgroupdriver=systemd"],
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "100m"
+            }
+          }
+
+    - name: Restart Docker service
+      command: systemctl restart docker
+
+    - name: Set SELinux permissive again
+      command: setenforce 0
+      ignore_errors: yes
+
+    - name: Add Kubernetes repository
+      copy:
+        dest: /etc/yum.repos.d/kubernetes.repo
+        content: |
+          [kubernetes]
+          name=Kubernetes
+          baseurl=https://pkgs.k8s.io/core:/stable:/v1.34/rpm/
+          enabled=1
+          gpgcheck=1
+          gpgkey=https://pkgs.k8s.io/core:/stable:/v1.34/rpm/repodata/repomd.xml.key
+          exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
+
+    - name: Install kubelet, kubeadm, kubectl
+      command: yum install -y kubelet kubeadm kubectl --disableexcludes=kubernetes
+
+    - name: Enable and start kubelet service
+      command: systemctl enable --now kubelet
+
+    - name: Generate containerd default configuration
+      shell: containerd config default | tee /etc/containerd/config.toml
+
+    - name: Restart containerd
+      command: systemctl restart containerd
+
+    - name: Reset worker node before joining (safe cleanup)
+      command: kubeadm reset -f
+      ignore_errors: true
+
+
+# Remove stale state that blocks a new join.
+    - name: Clean Kubernetes directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - /etc/cni/net.d
+        - /var/lib/cni/
+        - /var/lib/kubelet
+        - /etc/kubernetes
+
+# Ensure a clean networking state before kubeadm sets up new rules.
+    - name: Flush iptables
+      command: iptables -F
+      ignore_errors: true
+
+    - name: Copy join script from control node
+      copy:
+        src: ./kubeadm_join_token.sh
+        dest: /tmp/kubeadm_join_token.sh
+        mode: '0755'
+
+    - name: Join worker to cluster
+      command: bash /tmp/kubeadm_join_token.sh
+
+
+# ssh -i "privatekey.pem" ec2-user@100.27.33.178
+# ansible-playbook -i inventory.yaml image_playbook.yml --ask-vault-pass

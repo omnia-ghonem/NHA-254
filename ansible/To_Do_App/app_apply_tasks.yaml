@@ -1,0 +1,132 @@
+---
+- name: Build, push Docker image and deploy to Kubernetes
+  hosts: masters
+  become: yes
+
+  vars_files:
+    - ./secrets.yml   # ← encrypted
+  vars:
+    project_dir: /opt/todo-app
+    kubeconfig_path: /home/ec2-user/.kube/config
+    k8s_namespace: "to-do-namespace"
+    image_tag: "v1"
+
+  tasks:
+
+    - name: Ensure project directory exists on master
+      ansible.builtin.file:
+        path: "{{ project_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Copy application files (Docker & compose) to master
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ project_dir }}/{{ item | basename }}"
+        mode: "0644"
+      loop:
+        - ./Dockerfile
+
+
+    - name: Copy full app folder to remote host
+      ansible.builtin.copy:
+        src: ./app
+        dest: /opt/todo-app/
+        mode: "0755"
+
+    - name: Docker login to Docker Hub
+      ansible.builtin.command: >
+        docker login -u {{ dockerhub_username }} -p {{ dockerhub_password }}
+      register: docker_login_result
+      changed_when: "'Login Succeeded' in docker_login_result.stdout"
+
+
+    - name: Build Docker image from Dockerfile
+      ansible.builtin.command: >
+        docker build -t todo-local:latest -f {{ project_dir }}/Dockerfile {{ project_dir }}
+      args:
+        chdir: "{{ project_dir }}"
+
+    - name: Tag local image for Docker Hub
+      ansible.builtin.command: >
+        docker tag todo-local:latest omniaghonem/to-do-list:{{ image_tag }}
+
+
+    - name: Push Docker image to Docker Hub
+      ansible.builtin.command: >
+        docker push {{ dockerhub_username }}/to-do-list:{{ image_tag }}
+
+
+    - name: Create k8s directory on master
+      ansible.builtin.file:
+        path: "{{ project_dir }}/k8s"
+        state: directory
+        mode: "0755"
+
+    - name: Copy deployment and service manifests from local to master
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ project_dir }}/k8s/{{ item | basename }}" # basename is a Jinja2 filter that extracts the filename only, without the folder path.
+        mode: "0644"
+      loop:
+        - k8s/deployment.yml
+        - k8s/service.yml
+
+    - name: Create Kubernetes namespace
+      ansible.builtin.command: >
+        kubectl create namespace {{ k8s_namespace }}
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+    - name: Pull image from docker hub
+      ansible.builtin.command: >
+        sudo docker pull omniaghonem/to-do-list:v1
+
+    - name: Apply deployment manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ project_dir }}/k8s/deployment.yml -n {{ k8s_namespace }}
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+    - name: Apply service manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ project_dir }}/k8s/service.yml -n {{ k8s_namespace }}
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+      
+    - name: Wait for pods to be Ready
+      ansible.builtin.command: >
+        kubectl rollout status deployment/todo-app-deployment -n {{ k8s_namespace }}
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes 
+
+    - name: Check pods status
+      ansible.builtin.command: >
+        kubectl get pods -l app=todo-app -n {{ k8s_namespace }}
+      register: pods_status
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+    - name: Show pods status
+      ansible.builtin.debug:
+        var: pods_status.stdout
+
+    - name: Check service status
+      ansible.builtin.command: >
+        kubectl get svc todo-app-service -n {{ k8s_namespace }}
+      register: svc_status
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+      
+    - name: Show service status
+      ansible.builtin.debug:
+        var: svc_status.stdout      
+

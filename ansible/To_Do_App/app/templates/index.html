@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>To-Do List</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+
+<body>
+    <div class="container">
+        <h1>My To-Do List</h1>
+
+        <!-- Add Task Form -->
+        <form action="/add" method="post" class="add-form">
+            <input type="text" name="title" placeholder="Add new task..." required>
+            <button type="submit">Add</button>
+        </form>
+
+        <ul class="tasks">
+            {% for task in tasks %}
+            <li class="{% if task.completed %}completed{% endif %}">
+                <form action="/toggle/{{ task.id }}" method="post" class="inline-form">
+                    <button type="submit">
+                        {% if task.completed %}☑{% else %}☐{% endif %}
+                    </button>
+                </form>
+
+                <span>{{ task.title }}</span>
+
+                <form action="/delete/{{ task.id }}" method="post" class="inline-form delete-form">
+                    <button type="submit">🗑</button>
+                </form>
+            </li>
+            {% endfor %}
+        </ul>
+
+    </div>
+</body>
+</html>

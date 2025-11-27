@@ -1,0 +1,47 @@
+- name: Install Alertmanager
+  hosts: masters
+  become: yes
+  vars:
+    kubeconfig_path: /home/ec2-user/.kube/config
+    grafana_namespace: "monitoring"
+    grafana_download: "/opt/kubernetes-grafana/"
+
+
+  tasks:
+
+    - name: Download grafana Kubernetes Manifest Files From Github
+      ansible.builtin.git:
+        repo: "https://github.com/bibinwilson/kubernetes-grafana.git"
+        dest: "{{ grafana_download }}"
+
+
+    - name: Copy full app folder to remote host
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ grafana_download }}/{{ item | basename }}"
+        mode: "0755"
+      loop:
+        - ./grafana-datasource-config.yaml
+        
+    - name: Apply Grafana config manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ grafana_download }}/grafana-datasource-config.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+    - name: Apply Grafana Deployment manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ grafana_download }}/deployment.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
+
+    - name: Apply Grafana Service manifest
+      ansible.builtin.command: >
+        kubectl apply -f {{ grafana_download }}/service.yaml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: yes
+
