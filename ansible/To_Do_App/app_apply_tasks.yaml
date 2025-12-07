@@ -34,28 +34,10 @@
         dest: /opt/todo-app/
         mode: "0755"
 
-    - name: Docker login to Docker Hub
+
+    - name: Pull image from Docker Hub
       ansible.builtin.command: >
-        docker login -u {{ dockerhub_username }} -p {{ dockerhub_password }}
-      register: docker_login_result
-      changed_when: "'Login Succeeded' in docker_login_result.stdout"
-
-
-    - name: Build Docker image from Dockerfile
-      ansible.builtin.command: >
-        docker build -t todo-local:latest -f {{ project_dir }}/Dockerfile {{ project_dir }}
-      args:
-        chdir: "{{ project_dir }}"
-
-    - name: Tag local image for Docker Hub
-      ansible.builtin.command: >
-        docker tag todo-local:latest omniaghonem/to-do-list:{{ image_tag }}
-
-
-    - name: Push Docker image to Docker Hub
-      ansible.builtin.command: >
-        docker push {{ dockerhub_username }}/to-do-list:{{ image_tag }}
-
+        docker pull omniaghonem/to-do-list:v1
 
     - name: Create k8s directory on master
       ansible.builtin.file:
